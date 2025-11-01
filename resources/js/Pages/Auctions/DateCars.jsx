@@ -52,10 +52,12 @@ export default function DateCars({ date, auctions }) {
                                                     <span className={`px-2 py-1 rounded ${
                                                         auction.status === 'processed' ? 'bg-green-100 text-green-800' :
                                                         auction.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
+                                                        auction.status === 'pending_processing' ? 'bg-blue-100 text-blue-800' :
+                                                        auction.status === 'downloading' ? 'bg-purple-100 text-purple-800' :
                                                         auction.status === 'failed' ? 'bg-red-100 text-red-800' :
                                                         'bg-gray-100 text-gray-800'
                                                     }`}>
-                                                        {auction.status}
+                                                        {auction.status === 'pending_processing' ? 'queued' : auction.status}
                                                     </span>
                                                     <span>📷 {auction.image_count} images</span>
                                                     {!auction.has_extracted_data && (

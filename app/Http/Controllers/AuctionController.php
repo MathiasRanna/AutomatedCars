@@ -10,7 +10,7 @@ use Inertia\Inertia;
 class AuctionController extends Controller
 {
     /**
-     * Show dashboard with list of dates
+     * Show auctions index with list of dates
      */
     public function index()
     {
@@ -101,8 +101,8 @@ class AuctionController extends Controller
                     'id' => $image->id,
                     'url' => $url,
                     'path' => $image->stored_path,
-                    'is_sheet' => $image->is_sheet,
-                    'position' => $image->position,
+                    'is_sheet' => (bool) $image->is_sheet, // Convert to boolean to avoid showing "0" in frontend
+                    'position' => (int) $image->position,
                 ];
             })
             ->values() // Reset array keys to ensure sequential array
@@ -148,5 +148,62 @@ class AuctionController extends Controller
         ]);
 
         return redirect()->back()->with('success', 'Post saved successfully!');
+    }
+
+    /**
+     * Delete auction and all its images
+     */
+    public function destroy(Auction $auction)
+    {
+        $disk = Storage::disk('public');
+        
+        // Get all images for this auction
+        $images = $auction->images;
+        
+        // Delete all image files from storage
+        foreach ($images as $image) {
+            if ($disk->exists($image->stored_path)) {
+                $disk->delete($image->stored_path);
+            }
+        }
+        
+        // Delete the car folder if it exists (auctions/YYYY-MM-DD/{carFolder}/)
+        // Extract folder path from first image
+        if ($images->count() > 0) {
+            $firstImage = $images->first();
+            $pathParts = explode('/', $firstImage->stored_path);
+            
+            // Path structure: auctions/YYYY-MM-DD/{carFolder}/filename.jpg
+            if (count($pathParts) >= 3) {
+                $carFolder = $pathParts[0] . '/' . $pathParts[1] . '/' . $pathParts[2]; // auctions/YYYY-MM-DD/{carFolder}
+                if ($disk->exists($carFolder)) {
+                    $disk->deleteDirectory($carFolder);
+                }
+            }
+        }
+        
+        // Delete all image records from database
+        $auction->images()->delete();
+        
+        // Delete the auction record
+        $auction->delete();
+        
+        // Extract date from first image path for redirect
+        $date = null;
+        if ($images->count() > 0) {
+            $firstImagePath = $images->first()->stored_path;
+            if (preg_match('/auctions\/(\d{4}-\d{2}-\d{2})\//', $firstImagePath, $matches)) {
+                $date = $matches[1];
+            }
+        }
+        
+        // Redirect to date page if available, otherwise to auctions index
+        if ($date) {
+            return redirect()->route('auctions.date', $date)
+                ->with('success', 'Auction deleted successfully');
+        }
+        
+        return redirect()->route('auctions.index')
+            ->with('success', 'Auction deleted successfully');
     }
 }

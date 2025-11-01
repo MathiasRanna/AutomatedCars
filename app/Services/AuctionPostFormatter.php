@@ -31,7 +31,7 @@ class AuctionPostFormatter
 
         // Price section
         $price = $priceEUR ?: '0';
-        $post .= "💶 Starting price: " . $this->formatPrice($price) . "€\n\n";
+        $post .= "💶 Starting price: " . $this->formatPrice($price) . "€\n";
 
         // Bidding deadline
         if ($auctionDeadline) {
@@ -42,9 +42,9 @@ class AuctionPostFormatter
         $post .= "****\n\n";
 
         // Car details
-        $post .= "Car details:\n\n";
-        $post .= "📌 Engine: {$engine}\n\n";
-        $post .= "📌 Mileage: " . $this->formatPrice($mileage) . " km\n\n";
+        $post .= "Car details:\n";
+        $post .= "📌 Engine: {$engine}\n";
+        $post .= "📌 Mileage: " . $this->formatPrice($mileage) . " km\n";
 
         // Selling points
         if (!empty($sellingPoints)) {
@@ -55,10 +55,29 @@ class AuctionPostFormatter
         }
 
         // Damage notes
+        $hasDamageNotes = false;
         if (!empty($damageNotes)) {
             foreach ($damageNotes as $note) {
                 $post .= "📌 {$note}\n";
             }
+            $hasDamageNotes = true;
+        }
+
+        // Add conditional negative points based on grades
+        // Exterior grade lower than 5
+        $exteriorGradeNumeric = is_numeric($exteriorGrade) ? (int) $exteriorGrade : null;
+        if ($exteriorGradeNumeric !== null && $exteriorGradeNumeric < 5) {
+            $post .= "📌 Some exterior scratches or dents (see auction map)\n";
+            $hasDamageNotes = true;
+        }
+
+        // Interior grade not "A"
+        if ($interiorGrade !== 'A' && $interiorGrade !== 'N/A') {
+            $post .= "📌 Minor interior wear\n";
+            $hasDamageNotes = true;
+        }
+
+        if ($hasDamageNotes) {
             $post .= "\n";
         }
 
@@ -69,15 +88,15 @@ class AuctionPostFormatter
         $post .= "****\n\n";
 
         // Calculator link
-        $post .= "Calculate the final price of the vehicle here 🏁\n\n";
+        $post .= "Calculate the final price of the vehicle here 🏁\n";
         $post .= "www.jpcars.ee/calculator\n\n";
 
         $post .= "****\n\n";
 
         // Contact info
-        $post .= "Contact us:\n\n";
-        $post .= "✉️ E-mail: orders@jpcars.ee\n\n";
-        $post .= "📞 Phone: +37256992959 (WhatsApp)\n\n";
+        $post .= "Contact us:\n";
+        $post .= "✉️ E-mail: orders@jpcars.ee\n";
+        $post .= "📞 Phone: +37256992959 (WhatsApp)\n";
         $post .= "🇪🇪🇫🇮🇬🇧🇷🇺🇮🇹\n";
 
         return $post;

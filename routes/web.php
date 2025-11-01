@@ -18,7 +18,7 @@ Route::get('/', function () {
 });
 
 Route::get('/dashboard', function () {
-    return Inertia::render('Dashboard');
+    return redirect()->route('auctions.index');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
@@ -31,6 +31,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/auctions/date/{date}', [AuctionController::class, 'showByDate'])->name('auctions.date');
     Route::get('/auctions/{auction}', [AuctionController::class, 'show'])->name('auctions.show');
     Route::put('/auctions/{auction}/post', [AuctionController::class, 'updatePost'])->name('auctions.update-post');
+    Route::delete('/auctions/{auction}', [AuctionController::class, 'destroy'])->name('auctions.destroy');
 });
 
 require __DIR__.'/auth.php';

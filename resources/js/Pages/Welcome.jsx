@@ -26,9 +26,9 @@ export default function Welcome({ auth }) {
                                 <p className="text-sm text-gray-600 mb-4">
                                     Welcome back, {auth.user.name}!
                                 </p>
-                                <Link href={route('dashboard')}>
+                                <Link href={route('auctions.index')}>
                                     <PrimaryButton className="w-full">
-                                        Go to Dashboard
+                                        Go to Auctions
                                     </PrimaryButton>
                                 </Link>
                             </div>

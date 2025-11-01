@@ -1,11 +1,15 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, Link, useForm, router } from '@inertiajs/react';
 import PrimaryButton from '@/Components/PrimaryButton';
 import { useState, useEffect } from 'react';
 
 export default function AuctionShow({ auction, images, formattedPost, customPost }) {
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [copyMessage, setCopyMessage] = useState('');
+    const [copiedImageId, setCopiedImageId] = useState(null);
     
     // Debug: Log images on component mount
     useEffect(() => {
@@ -34,6 +38,128 @@ export default function AuctionShow({ auction, images, formattedPost, customPost
                 setIsSaving(false);
             },
         });
+    };
+
+    const handleDelete = () => {
+        if (!showDeleteConfirm) {
+            setShowDeleteConfirm(true);
+            return;
+        }
+
+        setIsDeleting(true);
+        router.delete(route('auctions.destroy', auction.id), {
+            onSuccess: () => {
+                // Redirect happens automatically via Inertia
+            },
+            onError: () => {
+                setIsDeleting(false);
+                setShowDeleteConfirm(false);
+            },
+        });
+    };
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(data.custom_post);
+            setCopyMessage('Copied to clipboard!');
+            setTimeout(() => setCopyMessage(''), 3000);
+        } catch (err) {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = data.custom_post;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                setCopyMessage('Copied to clipboard!');
+                setTimeout(() => setCopyMessage(''), 3000);
+            } catch (fallbackErr) {
+                setCopyMessage('Failed to copy');
+                setTimeout(() => setCopyMessage(''), 3000);
+            }
+            document.body.removeChild(textArea);
+        }
+    };
+
+    const handleCopyImage = async (imageUrl, imageId) => {
+        try {
+            // Convert relative URL to absolute if needed
+            const absoluteUrl = imageUrl.startsWith('http') 
+                ? imageUrl 
+                : `${window.location.origin}${imageUrl}`;
+            
+            // Check if ClipboardItem API is available
+            if (!window.ClipboardItem || !navigator.clipboard?.write) {
+                // Fallback: copy image URL as text
+                await navigator.clipboard.writeText(absoluteUrl);
+                setCopiedImageId(imageId);
+                setTimeout(() => setCopiedImageId(null), 2000);
+                return;
+            }
+            
+            // Use canvas to ensure we get proper image data
+            const img = new Image();
+            
+            // Wait for image to load
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = () => reject(new Error('Image failed to load'));
+                img.src = absoluteUrl;
+            });
+            
+            // Create canvas and draw image
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Convert canvas to blob and copy to clipboard
+            canvas.toBlob(async (blob) => {
+                if (!blob) {
+                    throw new Error('Failed to create blob from canvas');
+                }
+                
+                try {
+                    // Create ClipboardItem with proper MIME type
+                    const clipboardItem = new ClipboardItem({
+                        'image/png': blob  // Use PNG format for best compatibility
+                    });
+                    
+                    await navigator.clipboard.write([clipboardItem]);
+                    setCopiedImageId(imageId);
+                    setTimeout(() => setCopiedImageId(null), 2000);
+                } catch (clipboardErr) {
+                    console.error('Clipboard write failed:', clipboardErr);
+                    // Final fallback: copy URL as text
+                    try {
+                        await navigator.clipboard.writeText(absoluteUrl);
+                        setCopiedImageId(imageId);
+                        setTimeout(() => setCopiedImageId(null), 2000);
+                    } catch (fallbackErr) {
+                        console.error('Failed to copy image URL:', fallbackErr);
+                        alert('Failed to copy image. Please check browser permissions for clipboard access.');
+                    }
+                }
+            }, 'image/png'); // Always use PNG for clipboard compatibility
+            
+        } catch (err) {
+            console.error('Failed to copy image:', err);
+            // Fallback: try to copy URL as text
+            try {
+                const absoluteUrl = imageUrl.startsWith('http') 
+                    ? imageUrl 
+                    : `${window.location.origin}${imageUrl}`;
+                await navigator.clipboard.writeText(absoluteUrl);
+                setCopiedImageId(imageId);
+                setTimeout(() => setCopiedImageId(null), 2000);
+            } catch (fallbackErr) {
+                console.error('Failed to copy image URL:', fallbackErr);
+                alert('Failed to copy image. Please check browser permissions for clipboard access.');
+            }
+        }
     };
 
     // Extract date from first image path if available, or use auction_date
@@ -91,7 +217,7 @@ export default function AuctionShow({ auction, images, formattedPost, customPost
                                         {images.map((image) => (
                                             <div
                                                 key={image.id}
-                                                className="relative border border-gray-300 rounded-lg overflow-hidden bg-gray-100"
+                                                className="relative border border-gray-300 rounded-lg overflow-hidden bg-gray-100 group"
                                             >
                                                 <img
                                                     src={image.url}
@@ -103,11 +229,22 @@ export default function AuctionShow({ auction, images, formattedPost, customPost
                                                         e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EImage not found%3C/text%3E%3C/svg%3E';
                                                     }}
                                                 />
-                                                {image.is_sheet && (
+                                                {image.is_sheet ? (
                                                     <div className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
                                                         Sheet
                                                     </div>
-                                                )}
+                                                ) : null}
+                                                <button
+                                                    onClick={() => handleCopyImage(image.url, image.id)}
+                                                    className={`absolute bottom-2 left-1/2 transform -translate-x-1/2 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 shadow-lg ${
+                                                        copiedImageId === image.id
+                                                            ? 'bg-green-600 text-white opacity-100'
+                                                            : 'bg-blue-600 text-white opacity-90 hover:opacity-100 hover:bg-blue-700'
+                                                    }`}
+                                                    title="Click to copy image to clipboard"
+                                                >
+                                                    {copiedImageId === image.id ? '✓ Copied!' : '📋 Copy'}
+                                                </button>
                                             </div>
                                         ))}
                                     </div>
@@ -120,14 +257,26 @@ export default function AuctionShow({ auction, images, formattedPost, customPost
                             <div className="bg-white shadow-sm rounded-lg p-6">
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="text-lg font-semibold">Auction Post</h3>
-                                    <span className={`px-2 py-1 rounded text-xs ${
-                                        auction.status === 'processed' ? 'bg-green-100 text-green-800' :
-                                        auction.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
-                                        auction.status === 'failed' ? 'bg-red-100 text-red-800' :
-                                        'bg-gray-100 text-gray-800'
-                                    }`}>
-                                        {auction.status}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleCopy}
+                                            className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition"
+                                            title="Copy post text to clipboard"
+                                        >
+                                            📋 Copy
+                                        </button>
+                                        <span className={`px-2 py-1 rounded text-xs ${
+                                            auction.status === 'processed' ? 'bg-green-100 text-green-800' :
+                                            auction.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
+                                            auction.status === 'pending_processing' ? 'bg-blue-100 text-blue-800' :
+                                            auction.status === 'downloading' ? 'bg-purple-100 text-purple-800' :
+                                            auction.status === 'failed' ? 'bg-red-100 text-red-800' :
+                                            'bg-gray-100 text-gray-800'
+                                        }`}>
+                                            {auction.status === 'pending_processing' ? 'queued' : auction.status}
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <form onSubmit={submit} className="space-y-4">
@@ -151,18 +300,53 @@ export default function AuctionShow({ auction, images, formattedPost, customPost
                                             {saveMessage}
                                         </div>
                                     )}
+                                    {copyMessage && (
+                                        <div className={`p-3 border rounded-md text-sm ${
+                                            copyMessage.includes('Failed') 
+                                                ? 'bg-red-100 border-red-300 text-red-800' 
+                                                : 'bg-blue-100 border-blue-300 text-blue-800'
+                                        }`}>
+                                            {copyMessage}
+                                        </div>
+                                    )}
 
-                                    <div className="flex justify-end gap-2">
-                                        <Link
-                                            href={route('auctions.date', dateForNavigation)}
-                                            className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                                    <div className="flex justify-between items-center">
+                                        <button
+                                            type="button"
+                                            onClick={handleDelete}
+                                            disabled={isDeleting}
+                                            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                                         >
-                                            Cancel
-                                        </Link>
-                                        <PrimaryButton disabled={processing || isSaving}>
-                                            {processing || isSaving ? 'Saving...' : 'Save Post'}
-                                        </PrimaryButton>
+                                            {isDeleting ? 'Deleting...' : (showDeleteConfirm ? 'Confirm Delete' : 'Delete Auction')}
+                                        </button>
+                                        <div className="flex gap-2">
+                                            {showDeleteConfirm && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowDeleteConfirm(false)}
+                                                    className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 text-sm"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            )}
+                                            <Link
+                                                href={route('auctions.date', dateForNavigation)}
+                                                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                                            >
+                                                Back
+                                            </Link>
+                                            <PrimaryButton disabled={processing || isSaving}>
+                                                {processing || isSaving ? 'Saving...' : 'Save Post'}
+                                            </PrimaryButton>
+                                        </div>
                                     </div>
+                                    {showDeleteConfirm && (
+                                        <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                                            <p className="text-sm text-red-800">
+                                                ⚠️ Are you sure? This will permanently delete all images and data for this auction. This action cannot be undone.
+                                            </p>
+                                        </div>
+                                    )}
                                 </form>
 
                                 {auction.status === 'processed' && (
