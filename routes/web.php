@@ -1,10 +1,11 @@
 <?php
 
+use App\Http\Controllers\AuctionController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\AuctionReceiveController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
-use App\Http\Controllers\AuctionReceiveController;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken as FrameworkVerifyCsrfToken;
 
 Route::get('/', function () {
@@ -24,6 +25,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    
+    // Auction dashboard routes
+    Route::get('/auctions', [AuctionController::class, 'index'])->name('auctions.index');
+    Route::get('/auctions/date/{date}', [AuctionController::class, 'showByDate'])->name('auctions.date');
+    Route::get('/auctions/{auction}', [AuctionController::class, 'show'])->name('auctions.show');
+    Route::put('/auctions/{auction}/post', [AuctionController::class, 'updatePost'])->name('auctions.update-post');
 });
 
 require __DIR__.'/auth.php';
