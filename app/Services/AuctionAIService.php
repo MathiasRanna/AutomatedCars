@@ -11,13 +11,15 @@ class AuctionAIService
     private string $apiKey;
     private string $apiUrl;
     private string $model;
+    private string $provider;
 
     public function __construct()
     {
-        // Configure your AI service (OpenAI, Anthropic, etc.)
+        // Configure your AI service (Google Gemini, OpenAI, etc.)
         $this->apiKey = config('services.ai.api_key', env('AI_API_KEY'));
-        $this->apiUrl = config('services.ai.api_url', env('AI_API_URL', 'https://api.openai.com/v1/chat/completions'));
-        $this->model = config('services.ai.model', env('AI_MODEL', 'gpt-4o'));
+        $this->apiUrl = config('services.ai.api_url', env('AI_API_URL', 'https://generativelanguage.googleapis.com/v1beta/models'));
+        $this->model = config('services.ai.model', env('AI_MODEL', 'gemini-flash-lite-latest'));
+        $this->provider = config('services.ai.provider', env('AI_PROVIDER', 'gemini'));
     }
 
     /**
@@ -67,12 +69,23 @@ class AuctionAIService
             $mimeType = $this->guessMimeType($path);
             $base64 = base64_encode($imageContent);
 
-            $prepared[] = [
-                'type' => 'image_url',
-                'image_url' => [
-                    'url' => "data:{$mimeType};base64,{$base64}",
-                ],
-            ];
+            if ($this->provider === 'gemini') {
+                // Gemini uses inlineData format (note: mimeType not mime_type)
+                $prepared[] = [
+                    'inlineData' => [
+                        'mimeType' => $mimeType,
+                        'data' => $base64,
+                    ],
+                ];
+            } else {
+                // OpenAI format
+                $prepared[] = [
+                    'type' => 'image_url',
+                    'image_url' => [
+                        'url' => "data:{$mimeType};base64,{$base64}",
+                    ],
+                ];
+            }
         }
 
         return $prepared;
@@ -80,67 +93,154 @@ class AuctionAIService
 
     /**
      * Build the prompt for AI extraction
+     * Matches the Node.js implementation that works well
      */
-    private function buildExtractionPrompt(array $imageData, array $existingData): array
+    private function buildExtractionPrompt(array $imageData, array $existingData = []): array
     {
-        $systemPrompt = "You are an expert at analyzing car auction listings. Extract structured information from the provided images. 
-        Focus on: make, model, year, VIN, mileage, condition, damage description, sale location, sale date/time, reserve price, 
-        starting bid, and any other relevant details. Return a JSON object with the extracted fields.";
-
-        $userPrompt = "Please analyze these auction images and extract all relevant information. ";
+        $prompt = "You will receive one car auction sheet.";
         
+        // Incorporate existing data if available to provide context
         if (!empty($existingData)) {
-            $userPrompt .= "Here is some existing data from the scraper: " . json_encode($existingData) . ". ";
-            $userPrompt .= "Use this to complement what you extract from the images, and correct any errors if needed. ";
+            $contextParts = [];
+            if (!empty($existingData['price'])) {
+                $contextParts[] = "Price: " . $existingData['price'];
+            }
+            if (!empty($existingData['bid_deadline'])) {
+                $contextParts[] = "Bid deadline: " . $existingData['bid_deadline'];
+            }
+            if (!empty($existingData['auction_date'])) {
+                $contextParts[] = "Auction date: " . $existingData['auction_date'];
+            }
+            if (!empty($existingData['type'])) {
+                $contextParts[] = "Auction type: " . $existingData['type'];
+            }
+            
+            if (!empty($contextParts)) {
+                $prompt .= "\n\nAdditional context from scraper:\n" . implode("\n", $contextParts) . "\n\nUse this context to complement or verify information extracted from the images.";
+            }
         }
         
-        $userPrompt .= "Return only valid JSON with these fields: make, model, year, vin, mileage, condition, damage_description, 
-        location, sale_date, sale_time, reserve_price, starting_bid, notes (array of additional findings).";
+        $prompt .= "\n\nYour task is to:
+- Read text/markers in the images (OCR) and infer missing details.
+- Translate non-English text to English if needed.
+- Extract the vehicle information.
+- Extract the vehicle selling points from Selling points section and Notes(repairs,defects,condition, etc.) section.
+- Extract vechicle damage notes from Surveyors report (USS use column)
+- If car has some exterior scratches or dents, then just write next 'Some exterior scratches or dents (see auction map)'.
+- If there are scratches on alloy wheels or windshield, then you can mention them also'.
+- If car engine is in cc format, then convert it to liters.
+- Japanese car auction sheets use \"H\", \"S\", \"R\" etc. for years based on the Japanese imperial calendar, convert them to Gregorian calendar.
+- Return everything in English in structured JSON format.
 
-        $messages = [
-            [
-                'role' => 'system',
-                'content' => $systemPrompt,
-            ],
-            [
-                'role' => 'user',
-                'content' => array_merge(
+Required fields:
+- make
+- model
+- year
+- engine
+- mileage (number only)
+- sellingPoints[] (bullet points, in English)
+- damageNotes[] (bullet points, in English)
+- exteriorGrade (number from 1–6)
+- interiorGrade (letter from A–F)
+
+Respond with only JSON, no explanations or comments. 
+Example:
+{  \"make\": \"\",
+  \"model\": \"\",
+  \"year\": \"\",
+  \"engine\": \"\",
+  \"mileage\": 0,
+  \"auctionDeadline\": \"dd.mm.yyyy\",
+  \"sellingPoints\": [],
+  \"damageNotes\": [],
+  \"exteriorGrade\": 0,
+  \"interiorGrade\": \"\"
+}";
+
+        if ($this->provider === 'gemini') {
+            // Gemini format: contents array with parts (prompt first, then images)
+            // Matches Node.js: [prompt, imagePart]
+            $parts = array_merge(
+                [['text' => $prompt]],
+                $imageData
+            );
+
+            return [
+                'contents' => [
                     [
-                        [
-                            'type' => 'text',
-                            'text' => $userPrompt,
-                        ],
+                        'parts' => $parts,
                     ],
-                    $imageData
-                ),
-            ],
-        ];
+                ],
+                'generationConfig' => [
+                    'response_mime_type' => 'application/json',
+                ],
+            ];
+        } else {
+            // OpenAI format
+            $systemInstruction = "You are an expert at analyzing car auction listings. Extract structured information from auction sheets.";
+            
+            $messages = [
+                [
+                    'role' => 'system',
+                    'content' => $systemInstruction,
+                ],
+                [
+                    'role' => 'user',
+                    'content' => array_merge(
+                        [
+                            [
+                                'type' => 'text',
+                                'text' => $prompt,
+                            ],
+                        ],
+                        $imageData
+                    ),
+                ],
+            ];
 
-        return $messages;
+            return $messages;
+        }
     }
 
     /**
      * Make the actual AI API request
      */
-    private function makeAIRequest(array $messages): array
+    private function makeAIRequest(array $payload): array
     {
-        $response = Http::timeout(120)
-            ->withHeaders([
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type' => 'application/json',
-            ])
-            ->post($this->apiUrl, [
-                'model' => $this->model,
-                'messages' => $messages,
-                'response_format' => ['type' => 'json_object'], // Force JSON response
-                'max_tokens' => 2000,
-            ]);
+        if ($this->provider === 'gemini') {
+            // Gemini API: POST to /{model}:generateContent?key={api_key}
+            $url = $this->apiUrl . '/' . $this->model . ':generateContent?key=' . urlencode($this->apiKey);
+            
+            $response = Http::timeout(120)
+                ->withHeaders([
+                    'Content-Type' => 'application/json',
+                ])
+                ->post($url, $payload);
 
-        if (!$response->successful()) {
-            throw new \Exception('AI API request failed: ' . $response->body());
+            if (!$response->successful()) {
+                throw new \Exception('Gemini API request failed: ' . $response->body());
+            }
+
+            return $response->json();
+        } else {
+            // OpenAI API
+            $response = Http::timeout(120)
+                ->withHeaders([
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->post($this->apiUrl, array_merge($payload, [
+                    'model' => $this->model,
+                    'response_format' => ['type' => 'json_object'],
+                    'max_tokens' => 2000,
+                ]));
+
+            if (!$response->successful()) {
+                throw new \Exception('OpenAI API request failed: ' . $response->body());
+            }
+
+            return $response->json();
         }
-
-        return $response->json();
     }
 
     /**
@@ -148,7 +248,13 @@ class AuctionAIService
      */
     private function parseAIResponse(array $response): array
     {
-        $content = $response['choices'][0]['message']['content'] ?? '';
+        if ($this->provider === 'gemini') {
+            // Gemini response format: candidates[0].content.parts[0].text
+            $content = $response['candidates'][0]['content']['parts'][0]['text'] ?? '';
+        } else {
+            // OpenAI response format: choices[0].message.content
+            $content = $response['choices'][0]['message']['content'] ?? '';
+        }
         
         // Extract JSON from response (handle cases where AI wraps JSON in markdown)
         $json = $this->extractJson($content);
@@ -168,20 +274,28 @@ class AuctionAIService
 
     /**
      * Extract JSON from text (handles markdown code blocks)
+     * Matches the Node.js processGeminiResponse function
      */
     private function extractJson(string $text): string
     {
-        // Try to extract JSON from markdown code blocks
-        if (preg_match('/```(?:json)?\s*(\{.*?\})\s*```/s', $text, $matches)) {
-            return $matches[1];
+        // Trim whitespace
+        $jsonText = trim($text);
+        
+        // Remove ```json ... ``` or ``` ... ``` fences if present
+        if (strpos($jsonText, '```') === 0) {
+            $jsonText = preg_replace('/^```[a-zA-Z]*\n([\s\S]*?)\n```\s*$/m', '$1', $jsonText);
+            $jsonText = trim($jsonText);
+        }
+        
+        // Fallback: find the first { and last }
+        $firstBrace = strpos($jsonText, '{');
+        $lastBrace = strrpos($jsonText, '}');
+        
+        if ($firstBrace !== false && $lastBrace !== false && $lastBrace > $firstBrace) {
+            $jsonText = substr($jsonText, $firstBrace, $lastBrace - $firstBrace + 1);
         }
 
-        // Try to find JSON object
-        if (preg_match('/\{.*\}/s', $text, $matches)) {
-            return $matches[0];
-        }
-
-        return $text;
+        return $jsonText;
     }
 
     /**

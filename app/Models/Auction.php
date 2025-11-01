@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\AuctionPostFormatter;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -28,6 +29,21 @@ class Auction extends Model
 	public function images(): HasMany
 	{
 		return $this->hasMany(AuctionImage::class);
+	}
+
+	/**
+	 * Get formatted auction post text
+	 *
+	 * @return string|null Formatted post or null if no extracted data
+	 */
+	public function getFormattedPost(): ?string
+	{
+		if (empty($this->extracted_data)) {
+			return null;
+		}
+
+		$formatter = app(AuctionPostFormatter::class);
+		return $formatter->format($this->extracted_data, $this->price);
 	}
 }
 

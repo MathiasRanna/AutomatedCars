@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\CleanupOldImagesJob;
 use App\Jobs\ProcessAuctionJob;
 use App\Models\Auction;
 use App\Models\AuctionImage;
+use App\Services\ExchangeRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -28,8 +31,27 @@ class AuctionReceiveController extends Controller
 		$post = $validated['post'] ?? [];
 		$images = $validated['images'];
 
+		// Convert JPY price to EUR and round up to nearest 100
+		$priceEUR = 0; // Default to 0 EUR
+		if (!empty($post['price'])) {
+			$exchangeService = app(ExchangeRateService::class);
+			$conversion = $exchangeService->convertAndRound($post['price']);
+			
+			if ($conversion !== null) {
+				$priceEUR = $conversion['roundedEUR'];
+				Log::info('Price converted', [
+					'original_jpy' => $conversion['originalJPY'],
+					'rate' => $conversion['rate'],
+					'eur_amount' => $conversion['eurAmount'],
+					'rounded_eur' => $priceEUR,
+				]);
+			} else {
+				Log::warning('Failed to convert price', ['price_string' => $post['price']]);
+			}
+		}
+
 		$auction = Auction::create([
-			'price' => $post['price'] ?? null,
+			'price' => (string) $priceEUR,
 			'bid_deadline' => $post['bidDeadline'] ?? null,
 			'type' => $post['type'] ?? 'auctionsite',
 			'custom_folder_name' => $post['customFolderName'] ?? null,
@@ -40,7 +62,10 @@ class AuctionReceiveController extends Controller
 		$folderBase = $auction->custom_folder_name ?: ('Auction_' . now()->format('Y-m-d_His'));
 		$folderBase = Str::slug($folderBase, '_');
 		$disk = Storage::disk('public');
-		$relativeDir = 'auctions/' . $folderBase;
+		
+		// Create date-based folder structure: auctions/YYYY-MM-DD/{carFolder}/
+		$dateFolder = now()->format('Y-m-d');
+		$relativeDir = 'auctions/' . $dateFolder . '/' . $folderBase;
 
 		$stored = [];
 		foreach ($images as $idx => $url) {
@@ -87,6 +112,15 @@ class AuctionReceiveController extends Controller
 
 		// Dispatch job to process auction with AI
 		ProcessAuctionJob::dispatch($auction);
+
+		// Cleanup old images (triggered on each request to keep storage clean)
+		// Runs asynchronously via job queue to avoid blocking the response
+		try {
+			CleanupOldImagesJob::dispatch()->afterResponse();
+		} catch (\Exception $e) {
+			// Log but don't fail the request if cleanup fails
+			Log::warning('Failed to dispatch image cleanup job', ['error' => $e->getMessage()]);
+		}
 
 		return response()->json([
 			'message' => 'Auction received',

@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use App\Http\Controllers\AuctionReceiveController;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken as FrameworkVerifyCsrfToken;
-use Illuminate\Http\Request;
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -35,31 +34,6 @@ Route::post('/receive-post', AuctionReceiveController::class)
 
 // Preflight for scraper (CORS)
 Route::options('/receive-post', function () {
-    return response('', 204)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type')
-        ->header('Access-Control-Max-Age', '86400');
-})->withoutMiddleware([FrameworkVerifyCsrfToken::class]);
-
-// Lightweight test endpoint: accepts payload and returns 202 without processing
-Route::post('/receive-post-dry', function (Request $request) {
-    $data = $request->json()->all();
-    $imagesCount = is_array($data['images'] ?? null) ? count($data['images']) : 0;
-    return response()->json([
-        'message' => 'Accepted (dry run)',
-        'received' => [
-            'hasPost' => isset($data['post']) && is_array($data['post']),
-            'imagesCount' => $imagesCount,
-        ],
-    ], 202)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type');
-})->withoutMiddleware([FrameworkVerifyCsrfToken::class]);
-
-// Preflight for dry endpoint
-Route::options('/receive-post-dry', function () {
     return response('', 204)
         ->header('Access-Control-Allow-Origin', '*')
         ->header('Access-Control-Allow-Methods', 'POST, OPTIONS')
